@@ -57,6 +57,10 @@
     border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
   .suggest p { margin: 0 0 8px; font-size: 13px; }
   .suggest button { width: 100%; padding: 12px 10px; font-size: 15px; }
+  #colorMapOpts { display: none; background: #171b24; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 10px; }
+  #colorMapOpts select { font-size: 16px; }
+  .cut-color { flex: 1 1 140px; margin: 0; }
+  .matnote { display: none; color: #ffb4b4; background: #3a1c1c; border-radius: 6px; padding: 6px 8px; font-size: 12px; line-height: 1.35; }
   .report { background: #12141a; border: 1px solid var(--line); border-radius: 6px;
     padding: 8px 10px; white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace;
     color: #d0d5dd; max-height: 240px; overflow: auto; }
@@ -95,6 +99,7 @@
       <option value="fill">Fill: solid hex pack</option>
       <option value="halo">Fill: halo scatter</option>
       <option value="outline+halo">Fill: outline + halo</option>
+      <option value="colormap">Full fill (colour map)</option>
     </select>
   </label>
   <div id="fillOpts">
@@ -159,6 +164,44 @@
     <input type="number" id="spacingMm" value="" placeholder="auto" min="1" max="20" step="0.1">
   </label>
 
+  <div id="colorMapOpts">
+    <p class="hint">Fills the whole design. Outline and halo are optional and stay off the artwork interior.</p>
+    <label class="pair-like"><input type="checkbox" id="cmOutline" checked> Blue outline row on the edges</label>
+    <label class="pair-like"><input type="checkbox" id="cmHalo"> Clear halo outside the design</label>
+    <div class="pair">
+      <label>Blue areas
+        <select id="mapBlue">
+          <option value="blue" selected>Blue</option>
+          <option value="clear">Clear</option>
+          <option value="ab">AB (crystal)</option>
+          <option value="jet">Jet / onyx</option>
+          <option value="hematite">Hematite / grey</option>
+        </select>
+      </label>
+      <label>White / light
+        <select id="mapLight">
+          <option value="clear" selected>Clear</option>
+          <option value="ab">AB (crystal)</option>
+        </select>
+      </label>
+    </div>
+    <div class="pair">
+      <label>Black / dark
+        <select id="mapDark">
+          <option value="jet" selected>Jet / onyx</option>
+          <option value="hematite">Hematite / grey</option>
+          <option value="clear">Clear</option>
+        </select>
+      </label>
+      <label>Grey
+        <select id="mapGrey">
+          <option value="hematite" selected>Hematite / grey</option>
+          <option value="clear">Clear</option>
+          <option value="jet">Jet / onyx</option>
+        </select>
+      </label>
+    </div>
+  </div>
   <div class="mode-near">
     <label>Placement
       <select id="modeQuick">
@@ -167,6 +210,7 @@
         <option value="fill">Fill: solid hex pack</option>
         <option value="halo">Fill: halo scatter</option>
         <option value="outline+halo">Fill: outline + halo</option>
+        <option value="colormap">Full fill (colour map)</option>
       </select>
     </label>
   </div>
@@ -183,6 +227,9 @@
   <div class="btns">
     <button class="secondary" id="dlSvg">SVG (Cricut)</button>
     <button class="secondary" id="dlSvgCut">SVG cut only</button>
+    <label class="cut-color">Cut colour
+      <select id="cutColor"><option value="">Each colour</option></select>
+    </label>
     <button class="secondary" id="dlDxf">DXF</button>
     <button class="secondary" id="dlCounts">Counts</button>
     <button class="secondary" id="dlPng">Preview PNG</button>
@@ -205,6 +252,7 @@
 <main>
   <div class="toolbar">
     <span id="status" class="hint">No image loaded.</span>
+    <span id="matNote" class="matnote"></span>
   </div>
   <div class="stage"><canvas id="cv" width="800" height="400"></canvas></div>
 </main>
@@ -269,13 +317,29 @@
     if (custom !== "") return Math.max(0.5, +custom);
     return holeMm() + (+$("gap").value || 0);
   }
+  const STONE_FILL = {
+    blue: "#1e5aa8", clear: "#b7bdc8", ab: "#cbb6ee", jet: "#2b2b2b", hematite: "#6d7380"
+  };
+  const STONE_STROKE = {
+    blue: "#cfe3ff", clear: "#3e4654", ab: "#5c4784", jet: "#f0f0f0", hematite: "#e6e9ef"
+  };
+
   function cricutNote(w, h) {
     const a = Math.min(w, h), b = Math.max(w, h);
     if (a <= 11.5 + 1e-6 && b <= 11.5 + 1e-6)
       return "Fits a 12×12 in mat (cut area 11.5×11.5 in).";
-    if (a <= 11.5 + 1e-6 && b <= 23.5 + 1e-6)
-      return "Too large for a 12×12 in mat; fits a 12×24 in mat (cut area 11.5×23.5 in).";
-    return "WARNING: exceeds the 12×24 in mat cut area (11.5×23.5 in).";
+    if (b <= 23.5 + 1e-6)
+      return "Needs a 12×24 mat (max cut 11.5×23.5 in), or scale the width down so both sides are 11.5 in or less.";
+    return "WARNING: larger than a 12×24 mat (max cut 11.5×23.5 in). Scale the design down.";
+  }
+  function showMatNote(ci) {
+    const el = $("matNote");
+    if (!el) return;
+    if (!ci) { el.style.display = "none"; return; }
+    const note = cricutNote(ci.widthIn, ci.heightIn);
+    if (note.indexOf("Fits a 12×12") === 0) { el.style.display = "none"; el.textContent = ""; return; }
+    el.style.display = "block";
+    el.textContent = note;
   }
 
   function cropBlackBars(c) {
@@ -315,6 +379,14 @@
     $("mode").value = v;
     const q = $("modeQuick");
     if (q) q.value = v;
+    syncModeUI();
+  }
+  function syncModeUI() {
+    const v = $("mode").value;
+    const q = $("modeQuick");
+    if (q && q.value !== v) q.value = v;
+    const box = $("colorMapOpts");
+    if (box) box.style.display = v === "colormap" ? "block" : "none";
   }
   function hideArtSuggest() {
     const el = $("artSuggest");
@@ -411,6 +483,7 @@
         }
         canvasInfo = buildCanvasInfo();
         draw();
+        showMatNote(canvasInfo);
         $("status").textContent = src.name + "  " + src.w + "×" + src.h + " px  ·  " + (kind.art ? "flat artwork" : "photo");
         console.log("image loaded", src.w, src.h, kind);
       } catch (err) {
@@ -522,6 +595,123 @@
       }
     }
     return m;
+  }
+
+  // True background is only the colour (or transparency) that touches the
+  // picture border. Enclosed white, grey, and every other interior colour
+  // stay part of the artwork, so a halo cannot land inside the design.
+  function backgroundMask(data, w, h) {
+    const n = w * h;
+    const bg = new Uint8Array(n);
+    const buckets = new Map();
+    let borderN = 0, borderTrans = 0;
+    function borderPix(x, y) {
+      const i = (y * w + x) * 4;
+      borderN++;
+      if (data[i + 3] < 20) { borderTrans++; return; }
+      const key = ((data[i] >> 4) << 8) | ((data[i + 1] >> 4) << 4) | (data[i + 2] >> 4);
+      buckets.set(key, (buckets.get(key) || 0) + 1);
+    }
+    for (let x = 0; x < w; x++) { borderPix(x, 0); if (h > 1) borderPix(x, h - 1); }
+    for (let y = 1; y < h - 1; y++) { borderPix(0, y); if (w > 1) borderPix(w - 1, y); }
+    const useAlpha = borderN > 0 && borderTrans / borderN > 0.45;
+    let refR = 255, refG = 255, refB = 255;
+    if (!useAlpha) {
+      let best = -1, bestKey = 0;
+      buckets.forEach((count, key) => { if (count > best) { best = count; bestKey = key; } });
+      refR = ((bestKey >> 8) & 15) * 16 + 8;
+      refG = ((bestKey >> 4) & 15) * 16 + 8;
+      refB = (bestKey & 15) * 16 + 8;
+    }
+    const tol2 = 42 * 42;
+    function isBg(i) {
+      const p = i * 4;
+      const a = data[p + 3];
+      if (useAlpha) return a < 20;
+      if (a < 20) return false;
+      const dr = data[p] - refR, dg = data[p + 1] - refG, db = data[p + 2] - refB;
+      return dr * dr + dg * dg + db * db <= tol2;
+    }
+    const stack = [];
+    function consider(x, y) {
+      if (x < 0 || y < 0 || x >= w || y >= h) return;
+      const i = y * w + x;
+      if (bg[i] || !isBg(i)) return;
+      bg[i] = 1;
+      stack.push(x, y);
+    }
+    for (let x = 0; x < w; x++) { consider(x, 0); if (h > 1) consider(x, h - 1); }
+    for (let y = 1; y < h - 1; y++) { consider(0, y); if (w > 1) consider(w - 1, y); }
+    while (stack.length) {
+      const y = stack.pop(), x = stack.pop();
+      consider(x + 1, y); consider(x - 1, y); consider(x, y + 1); consider(x, y - 1);
+    }
+    return bg;
+  }
+  function groupOf(r, g, b) {
+    if (isBluePixel(r, g, b)) return "blue";
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const sat = max === 0 ? 0 : (max - min) / max;
+    const lum = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+    if (lum <= 0.22) return "dark";
+    if (lum >= 0.78 && sat < 0.34) return "light";
+    if (sat < 0.30) return "grey";
+    if (lum >= 0.75) return "light";
+    if (lum <= 0.28) return "dark";
+    return "grey";
+  }
+  function groupToStone(g) {
+    if (g === "blue") return ($("mapBlue") && $("mapBlue").value) || "blue";
+    if (g === "light") return ($("mapLight") && $("mapLight").value) || "clear";
+    if (g === "dark") return ($("mapDark") && $("mapDark").value) || "jet";
+    return ($("mapGrey") && $("mapGrey").value) || "hematite";
+  }
+  function makeSpacer(minDist) {
+    const cell = Math.max(minDist, 0.001);
+    const bins = new Map();
+    const md2 = minDist * minDist;
+    function add(x, y) {
+      const ix = Math.floor(x / cell), iy = Math.floor(y / cell);
+      const k = ix + "," + iy;
+      let a = bins.get(k);
+      if (!a) { a = []; bins.set(k, a); }
+      a.push(x, y);
+    }
+    function ok(x, y) {
+      const ix = Math.floor(x / cell), iy = Math.floor(y / cell);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const a = bins.get((ix + dx) + "," + (iy + dy));
+        if (!a) continue;
+        for (let i = 0; i < a.length; i += 2) {
+          const ddx = x - a[i], ddy = y - a[i + 1];
+          if (ddx * ddx + ddy * ddy < md2) return false;
+        }
+      }
+      return true;
+    }
+    return { add: add, ok: ok };
+  }
+  function placeColorFill(art, data, w, h, spacing) {
+    const pts = [];
+    const spacer = makeSpacer(spacing * 0.98);
+    const rowH = spacing * Math.sqrt(3) / 2;
+    let row = 0;
+    for (let y = spacing / 2; y < h; y += rowH, row++) {
+      const xoff = row % 2 === 0 ? 0 : spacing / 2;
+      for (let x = xoff + spacing / 2; x < w; x += spacing) {
+        const xi = Math.round(x), yi = Math.round(y);
+        if (xi < 0 || yi < 0 || xi >= w || yi >= h) continue;
+        const i = yi * w + xi;
+        if (!art[i]) continue;
+        if (!spacer.ok(x, y)) continue;
+        const p = i * 4;
+        if (data[p + 3] < 16) continue;
+        const color = groupToStone(groupOf(data[p], data[p + 1], data[p + 2]));
+        pts.push({ x: x, y: y, color: color, v: 1 });
+        spacer.add(x, y);
+      }
+    }
+    return { pts: pts, spacer: spacer };
   }
   function morph(src, w, h, radius, erode) {
     const out = new Uint8Array(src.length);
@@ -973,6 +1163,35 @@
             colored.push(found[i]);
           }
           pts = enforceSpacing(colored, spacingPx);
+        } else if (mode === "colormap") {
+          const data = src.data.data;
+          const bg = backgroundMask(data, src.w, src.h);
+          const art = new Uint8Array(bg.length);
+          for (let i = 0; i < bg.length; i++) art[i] = bg[i] || data[i * 4 + 3] < 16 ? 0 : 1;
+          if ($("cmOutline").checked) {
+            const outlineName = $("outlineColor").value;
+            let mask = segmentColor(data, src.w, src.h, outlineName);
+            const minA = Math.max(50, (0.002 * src.w * src.h) | 0);
+            mask = keepLargest(mask, src.w, src.h, minA);
+            const r = placeOutline(mask, src.w, src.h, spacingPx, $("edges").value);
+            const outlineColor = outlineName === "white" ? groupToStone("light")
+              : outlineName === "black" ? groupToStone("dark")
+              : groupToStone("blue");
+            pts = enforceSpacing(r.pts.map((p) => Object.assign({ color: outlineColor, v: 1 }, p)), spacingPx);
+            colorDefault = outlineColor;
+          }
+          const filled = placeColorFill(art, data, src.w, src.h, spacingPx, pts);
+          // Keep fill stones off the outline row.
+          const spacer = makeSpacer(spacingPx * 0.98);
+          pts.forEach((p) => spacer.add(p.x, p.y));
+          filled.pts.forEach((p) => { if (spacer.ok(p.x, p.y)) { spacer.add(p.x, p.y); pts.push(p); } });
+          if ($("cmHalo").checked) {
+            const falloffPx = 0.12 * ci.srcW;
+            const existing = pts.map((p) => ({ x: p.x, y: p.y }));
+            const halo = placeHalo(art, bg, src.w, src.h, spacingPx * 1.05, spacingPx * 2.6, falloffPx, existing);
+            const haloColor = groupToStone("light");
+            pts = pts.concat(halo.map((p) => Object.assign({ color: haloColor, v: 1 }, p)));
+          }
         } else {
           const outlineName = $("outlineColor").value;
           let mask = segmentColor(src.data.data, src.w, src.h, outlineName);
@@ -980,7 +1199,7 @@
           mask = keepLargest(mask, src.w, src.h, minA);
           if (mode === "outline" || mode === "outline+halo") {
             const r = placeOutline(mask, src.w, src.h, spacingPx, $("edges").value);
-            pts = r.pts.map((p) => Object.assign({ color: outlineName, v: 1 }, p));
+            pts = enforceSpacing(r.pts.map((p) => Object.assign({ color: outlineName, v: 1 }, p)), spacingPx);
             colorDefault = outlineName;
           }
           if (mode === "fill") {
@@ -993,22 +1212,13 @@
             pts = pts.concat(packed.map((p) => Object.assign({ color: "clear" }, p)));
           }
           if (mode === "halo" || mode === "outline+halo") {
-            const black = segmentColor(src.data.data, src.w, src.h, "black");
-            const attract = new Uint8Array(black.length);
-            for (let i = 0; i < black.length; i++) attract[i] = black[i] ? 0 : 1;
-            const allowed = new Uint8Array(attract.length);
-            allowed.fill(1);
-            const ex = $("excludeFill").value;
-            if (ex) {
-              const em = segmentColor(src.data.data, src.w, src.h, ex);
-              for (let i = 0; i < allowed.length; i++) if (em[i]) allowed[i] = 0;
-            }
-            const om = segmentColor(src.data.data, src.w, src.h, outlineName);
-            for (let i = 0; i < allowed.length; i++) if (om[i]) allowed[i] = 0;
+            const bg = backgroundMask(src.data.data, src.w, src.h);
+            const attract = new Uint8Array(bg.length);
+            for (let i = 0; i < bg.length; i++) attract[i] = bg[i] ? 0 : 1;
             const falloffPx = 0.12 * ci.srcW;
             const existing = pts.map((p) => ({ x: p.x, y: p.y }));
-            const halo = placeHalo(attract, allowed, src.w, src.h, spacingPx * 1.05, spacingPx * 2.6, falloffPx, existing);
-            pts = pts.concat(halo.map((p) => Object.assign({ color: "clear" }, p)));
+            const halo = placeHalo(attract, bg, src.w, src.h, spacingPx * 1.05, spacingPx * 2.6, falloffPx, existing);
+            pts = pts.concat(halo.map((p) => Object.assign({ color: "clear", v: 1 }, p)));
           }
         }
         const pad = 0.05;
@@ -1030,8 +1240,10 @@
           $("report").textContent += "Only " + stones.length + " stones. Flat artwork should use Outline, not Detect.\n";
           showArtSuggest(stones.length);
         } else {
-          $("status").textContent = stones.length + " stones  ·  " + ci.widthIn.toFixed(2) + " × " + ci.heightIn.toFixed(2) + " in";
+          $("status").textContent = stones.length + " stones  ·  " + ci.widthIn.toFixed(2) + " × " + ci.heightIn.toFixed(2) + " in  ·  " + colorCountText();
         }
+        showMatNote(ci);
+        refreshCutColors();
       } catch (err) {
         console.error(err);
         showError(err && err.message ? err.message : String(err));
@@ -1071,10 +1283,10 @@
       const cx = s.x * dpi, cy = s.y * dpi;
       ctx.beginPath();
       ctx.arc(cx, cy, rPx, 0, Math.PI * 2);
-      ctx.fillStyle = s.color === "blue" ? "#1e5aa8" : "#222";
+      ctx.fillStyle = STONE_FILL[s.color] || "#222";
       ctx.fill();
       ctx.lineWidth = Math.max(1, rPx / 6);
-      ctx.strokeStyle = s.color === "blue" ? "#cfe3ff" : "#fff";
+      ctx.strokeStyle = STONE_STROKE[s.color] || "#fff";
       ctx.stroke();
     }
   }
@@ -1111,7 +1323,31 @@
     Object.keys(groups).forEach((c) => { t += "  " + c + ": " + groups[c] + "  ×  " + size + "\n"; });
     t += "\nTotal: " + stones.length + "\n";
     $("report").textContent = t;
-    $("report").className = "report " + (cricutNote(ci.widthIn, ci.heightIn).indexOf("WARNING") >= 0 ? "warn" : "");
+    const note = cricutNote(ci.widthIn, ci.heightIn);
+    $("report").className = "report " + (note.indexOf("Fits a 12×12") === 0 ? "" : "warn");
+    showMatNote(ci);
+  }
+  function colorCountText() {
+    const groups = {};
+    stones.forEach((s) => { groups[s.color] = (groups[s.color] || 0) + 1; });
+    return Object.keys(groups).sort().map((c) => c + " " + groups[c]).join(", ");
+  }
+  function refreshCutColors() {
+    const sel = $("cutColor");
+    if (!sel) return;
+    const prev = sel.value;
+    const colors = {};
+    stones.forEach((s) => { colors[s.color] = 1; });
+    sel.innerHTML = "";
+    const all = document.createElement("option");
+    all.value = ""; all.textContent = "Each colour";
+    sel.appendChild(all);
+    Object.keys(colors).sort().forEach((c) => {
+      const o = document.createElement("option");
+      o.value = c; o.textContent = c;
+      sel.appendChild(o);
+    });
+    if (colors[prev]) sel.value = prev;
   }
 
   function circlePath(cx, cy, r) {
@@ -1124,19 +1360,22 @@
       " C " + f(cx+k) + " " + f(cy-r) + " " + f(cx+r) + " " + f(cy-k) + " " + f(cx+r) + " " + f(cy) + " Z";
   }
 
-  function svgText(stonesOnly) {
+  function svgText(colorFilter) {
     const ci = canvasInfo;
     const w = ci.widthIn, h = ci.heightIn;
     const r = (holeMm() / MM_PER_IN) / 2;
     const groups = {};
-    stones.forEach((s) => { (groups[s.color] = groups[s.color] || []).push(s); });
-    const fills = { blue: "#1e5aa8", clear: "#111111", default: "#111111" };
+    stones.forEach((s) => {
+      if (colorFilter && s.color !== colorFilter) return;
+      (groups[s.color] = groups[s.color] || []).push(s);
+    });
     let out = '<?xml version="1.0" encoding="UTF-8"?>\n';
     out += '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + 'in" height="' + h + 'in" viewBox="0 0 ' + w + ' ' + h + '" version="1.1">\n';
     out += "  <title>Rhinestone template</title>\n";
-    out += "  <desc>Holes are filled paths in inch units. In Cricut Design Space set material to flock or rhinestone template and Attach so the layout is kept.</desc>\n";
-    Object.keys(groups).forEach((c) => {
-      out += '  <g id="stones-' + c + '" fill="' + (fills[c] || fills.default) + '" stroke="none">\n';
+    out += "  <desc>Holes are filled paths in inch units. One group per stone colour. In Cricut Design Space set material to flock or rhinestone template and Attach so the layout is kept.</desc>\n";
+    Object.keys(groups).sort().forEach((c) => {
+      const fill = STONE_FILL[c] || "#888888";
+      out += '  <g id="stones-' + c + '" fill="' + fill + '" stroke="none">\n';
       groups[c].forEach((s) => { out += '    <path d="' + circlePath(s.x, s.y, r) + '"/>\n'; });
       out += "  </g>\n";
     });
@@ -1172,13 +1411,23 @@
     return base + "_" + $("size").value;
   }
 
-  $("mode").addEventListener("change", () => { const q = $("modeQuick"); if (q) q.value = $("mode").value; });
-  $("modeQuick").addEventListener("change", () => { $("mode").value = $("modeQuick").value; });
+  $("mode").addEventListener("change", () => { const q = $("modeQuick"); if (q) q.value = $("mode").value; syncModeUI(); });
+  $("modeQuick").addEventListener("change", () => { $("mode").value = $("modeQuick").value; syncModeUI(); });
   $("artSuggestBtn").addEventListener("click", () => { setMode("outline"); hideArtSuggest(); place(); });
   $("btnPlace").addEventListener("click", place);
-  $("btnClear").addEventListener("click", () => { stones = []; draw(); writeReport(); });
-  $("dlSvg").addEventListener("click", () => { if (!stones.length) return alert("No stones yet."); download(stem() + ".svg", svgText(false), "image/svg+xml"); });
-  $("dlSvgCut").addEventListener("click", () => { if (!stones.length) return alert("No stones yet."); download(stem() + "_cut.svg", svgText(true), "image/svg+xml"); });
+  $("btnClear").addEventListener("click", () => { stones = []; draw(); writeReport(); refreshCutColors(); });
+  $("dlSvg").addEventListener("click", () => { if (!stones.length) return alert("No stones yet."); download(stem() + ".svg", svgText(null), "image/svg+xml"); });
+  $("dlSvgCut").addEventListener("click", () => {
+    if (!stones.length) return alert("No stones yet.");
+    const which = $("cutColor").value;
+    if (which) { download(stem() + "_" + which + "_cut.svg", svgText(which), "image/svg+xml"); return; }
+    const colors = [];
+    const seen = {};
+    stones.forEach((s) => { if (!seen[s.color]) { seen[s.color] = 1; colors.push(s.color); } });
+    colors.sort().forEach((c, i) => {
+      setTimeout(() => download(stem() + "_" + c + "_cut.svg", svgText(c), "image/svg+xml"), i * 350);
+    });
+  });
   $("dlDxf").addEventListener("click", () => { if (!stones.length) return alert("No stones yet."); download(stem() + ".dxf", dxfText(), "application/dxf"); });
   $("dlCounts").addEventListener("click", () => { download(stem() + "_counts.txt", $("report").textContent, "text/plain"); });
   $("dlPng").addEventListener("click", () => {
