@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rhinestone Template Tool</title>
+<style>
+  :root {
+    --bg: #14161c; --panel: #1d212b; --ink: #e8eaef; --muted: #9aa3b2;
+    --line: #2c3340; --accent: #d4a017; --blue: #1e5aa8; --ok: #3dba7a;
+    --danger: #e35d5d; --chip: #262b36;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 16px 20px 8px; border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+  header h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: .02em; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  .layout { display: grid; grid-template-columns: 340px 1fr; min-height: calc(100% - 58px); }
+  aside { border-right: 1px solid var(--line); background: var(--panel); padding: 14px 16px 32px;
+    overflow: auto; }
+  main { display: flex; flex-direction: column; min-width: 0; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 14px;
+    border-bottom: 1px solid var(--line); align-items: center; }
+  .stage { flex: 1; overflow: auto; background: #0f1115; display: flex; justify-content: center;
+    align-items: flex-start; padding: 16px; }
+  canvas { background: #1a1d24; max-width: 100%; height: auto; cursor: crosshair;
+    box-shadow: 0 0 0 1px var(--line); }
+  h2 { margin: 18px 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .12em;
+    color: var(--muted); }
+  label, .row { display: block; margin: 8px 0; }
+  label span, .lab { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+  input[type="text"], input[type="number"], select, input[type="file"] {
+    width: 100%; margin-top: 4px; background: var(--chip); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
+  .banner { background: #7a1f1f; color: #fff; padding: 10px; border-radius: 6px; font-size: 13px; margin: 8px 0; }
+  .file-big { display: block; width: 100%; min-height: 56px; font-size: 16px; padding: 14px 10px;
+    background: var(--accent); color: #1a1404; border: 0; border-radius: 8px; }
+  .file-big::file-selector-button, .file-big::-webkit-file-upload-button { font: 650 16px system-ui, sans-serif;
+    padding: 10px 14px; margin-right: 10px; border: 0; border-radius: 6px; background: #1a1404; color: #fff; }
+  .upload-btn { position: relative; display: block; text-align: center; background: var(--accent);
+    color: #1a1404; font-weight: 650; border-radius: 8px; padding: 16px 12px; margin: 8px 0; cursor: pointer; overflow: hidden; }
+  .upload-btn input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0;
+    margin: 0; padding: 0; border: 0; cursor: pointer; font-size: 100px; }
+  .hint { font-size: 11px; color: var(--muted); margin: 0 0 8px; }
+  input[type="range"] { width: 100%; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  button, .btn { background: var(--accent); color: #1a1404; border: 0; border-radius: 6px;
+    padding: 8px 12px; font: 650 13px/1 "Segoe UI", system-ui, sans-serif; cursor: pointer; }
+  button.secondary, .btn.secondary { background: var(--chip); color: var(--ink);
+    border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .report { background: #12141a; border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px 10px; white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace;
+    color: #d0d5dd; max-height: 240px; overflow: auto; }
+  .warn { color: var(--danger); }
+  .ok { color: var(--ok); }
+  .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  table.sizes { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.sizes th, table.sizes td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--line); }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } aside { max-height: 50vh; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Rhinestone Template Tool</h1>
+  <p>Detect stones in a photo or fill artwork. Export Cricut-ready SVG (inch units, holes as paths). Works offline.</p>
+</header>
+<div class="layout">
+<aside>
+  <h2>Image</h2>
+  <div id="jsBanner" class="banner">If you can read this, the tool's scripts did not run. Open this file in Safari or Chrome (not a preview inside another app).</div>
+  <label for="file" class="lab" style="margin-top:8px">Upload photo or artwork</label>
+  <input type="file" id="file" class="file-big" accept="image/*">
+  <div class="hint">Phone tip: open this file in Safari or Chrome, not an in-app preview. You can also paste an image.</div>
+  <label class="pair-like"><input type="checkbox" id="cropBars"> Trim black letterbox bars</label>
+
+  <h2>Mode</h2>
+  <label>Placement
+    <select id="mode">
+      <option value="detect">Detect from photo</option>
+      <option value="outline">Fill: outline edges</option>
+      <option value="fill">Fill: solid hex pack</option>
+      <option value="halo">Fill: halo scatter</option>
+      <option value="outline+halo">Fill: outline + halo</option>
+    </select>
+  </label>
+  <div id="fillOpts">
+    <div class="pair">
+      <label>Outline colour
+        <select id="outlineColor">
+          <option value="blue">Blue</option>
+          <option value="white">White</option>
+          <option value="black">Black (invert)</option>
+        </select>
+      </label>
+      <label>Edges
+        <select id="edges">
+          <option value="both">Both (outer + inner)</option>
+          <option value="outer">Outer only</option>
+          <option value="inner">Inner / holes only</option>
+        </select>
+      </label>
+    </div>
+    <label>Keep empty (no stones on this colour)
+      <select id="excludeFill">
+        <option value="">None</option>
+        <option value="white" selected>White fill</option>
+        <option value="blue">Blue</option>
+        <option value="black">Black</option>
+      </select>
+    </label>
+  </div>
+
+  <h2>Size and scale</h2>
+  <div class="pair">
+    <label>Stone size
+      <select id="size"></select>
+    </label>
+    <label>Tolerance (mm)
+      <input type="number" id="tolerance" value="0.2" min="0" max="1" step="0.05">
+    </label>
+  </div>
+  <div class="pair">
+    <label>Width (in)
+      <input type="number" id="widthIn" value="10" min="0.5" max="24" step="0.1">
+    </label>
+    <label>Square canvas (in)
+      <input type="number" id="canvasIn" value="" placeholder="e.g. 9" min="0" max="24" step="0.1">
+    </label>
+  </div>
+  <label>Canvas margin (in), used with a square canvas
+    <input type="number" id="marginIn" value="0.75" min="0" max="4" step="0.05">
+  </label>
+  <label>Extra gap (mm) so holes do not touch
+    <input type="number" id="gap" value="0.15" min="0" max="2" step="0.05">
+  </label>
+
+  <h2>Detect</h2>
+  <label><span>Sensitivity <em id="sensVal">0.55</em></span>
+    <input type="range" id="sensitivity" min="0" max="100" value="55">
+  </label>
+  <p class="hint">Lower is stricter (fewer false hits). Higher picks up dimmer stones.</p>
+
+  <h2>Fill spacing</h2>
+  <label>Override spacing (mm), blank = hole + gap
+    <input type="number" id="spacingMm" value="" placeholder="auto" min="1" max="20" step="0.1">
+  </label>
+
+  <div class="btns">
+    <button id="btnPlace">Place stones</button>
+    <button class="secondary" id="btnClear">Clear stones</button>
+  </div>
+
+  <h2>Download</h2>
+  <div class="btns">
+    <button class="secondary" id="dlSvg">SVG (Cricut)</button>
+    <button class="secondary" id="dlSvgCut">SVG cut only</button>
+    <button class="secondary" id="dlDxf">DXF</button>
+    <button class="secondary" id="dlCounts">Counts</button>
+    <button class="secondary" id="dlPng">Preview PNG</button>
+  </div>
+  <p class="hint">Click a stone to remove it. Click empty space to add one (uses the current size and colour).</p>
+
+  <h2>Report</h2>
+  <div class="report" id="report">Load an image, then click Place stones.</div>
+
+  <h2>Stone sizes</h2>
+  <table class="sizes">
+    <thead><tr><th>Size</th><th>Mid</th><th>Range</th></tr></thead>
+    <tbody id="sizeTable"></tbody>
+  </table>
+  <p class="hint">Midpoints of standard SS millimetre ranges (Dreamtime Creations / GlitzOnline). Hole = stone + tolerance.</p>
+
+  <h2>Cricut tip</h2>
+  <p class="hint">Import the SVG, set the material to flock or rhinestone template, and Attach so the layout is kept. 12×12 mat cuts 11.5×11.5 in; 12×24 mat cuts 11.5×23.5 in.</p>
+</aside>
+<main>
+  <div class="toolbar">
+    <span id="status" class="hint">No image loaded.</span>
+  </div>
+  <div class="stage"><canvas id="cv" width="800" height="400"></canvas></div>
+</main>
+</div>
+<script>
+  (function () {
+    var b = document.getElementById("jsBanner"); if (b) b.style.display = "none";
+    function show(msg) { var e = document.getElementById("jsBanner"); if (!e) return; e.style.display = "block"; e.textContent = "Error: " + msg; }
+    window.addEventListener("error", function (ev) { show((ev.message || "script error") + (ev.lineno ? " (line " + ev.lineno + ")" : "")); console.error(ev.error || ev.message); });
+    window.addEventListener("unhandledrejection", function (ev) { show(String(ev.reason)); });
+  })();
+
+(function () {
+  const SIZES = {
+    SS6:  { mm: 2.0, range: [1.90, 2.10] },
+    SS10: { mm: 2.8, range: [2.70, 2.90] },
+    SS12: { mm: 3.1, range: [3.00, 3.20] },
+    SS16: { mm: 3.9, range: [3.80, 4.00] },
+    SS20: { mm: 4.7, range: [4.60, 4.80] },
+    SS30: { mm: 6.4, range: [6.32, 6.50] }
+  };
+  const MM_PER_IN = 25.4;
+  const KAPPA = 0.5522847498307936;
+
+  const $ = (id) => document.getElementById(id);
+  const sizeSel = $("size");
+  const sizeTable = $("sizeTable");
+  Object.keys(SIZES).forEach((k) => {
+    const o = document.createElement("option");
+    o.value = k; o.textContent = k + "  (" + SIZES[k].mm.toFixed(1) + " mm)";
+    if (k === "SS10") o.selected = true;
+    sizeSel.appendChild(o);
+    const r = SIZES[k].range;
+    sizeTable.insertAdjacentHTML("beforeend",
+      "<tr><td>" + k + "</td><td>" + SIZES[k].mm.toFixed(1) + " mm</td><td>" + r[0].toFixed(2) + "–" + r[1].toFixed(2) + "</td></tr>");
+  });
+
+  $("sensitivity").addEventListener("input", () => {
+    $("sensVal").textContent = (+$("sensitivity").value / 100).toFixed(2);
+  });
+
+  let src = null; // { canvas, w, h, data, name }
+  let stones = []; // {x, y, color} in inches of the output canvas
+  let canvasInfo = null; // {widthIn, heightIn, ox, oy, inPerPx, srcW, srcH, content?}
+
+  function holeMm() {
+    const s = $("size").value;
+    return SIZES[s].mm + (+$("tolerance").value || 0);
+  }
+  function minSpacingMm() {
+    const custom = $("spacingMm").value;
+    if (custom !== "") return Math.max(0.5, +custom);
+    return holeMm() + (+$("gap").value || 0);
+  }
+  function cricutNote(w, h) {
+    const a = Math.min(w, h), b = Math.max(w, h);
+    if (a <= 11.5 + 1e-6 && b <= 11.5 + 1e-6)
+      return "Fits a 12×12 in mat (cut area 11.5×11.5 in).";
+    if (a <= 11.5 + 1e-6 && b <= 23.5 + 1e-6)
+      return "Too large for a 12×12 in mat; fits a 12×24 in mat (cut area 11.5×23.5 in).";
+    return "WARNING: exceeds the 12×24 in mat cut area (11.5×23.5 in).";
+  }
+
+  function cropBlackBars(c) {
+    const ctx = c.getContext("2d");
+    const { width: w, height: h } = c;
+    const img = ctx.getImageData(0, 0, w, h).data;
+    const rowMean = (y) => {
+      let s = 0;
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        s += (img[i] + img[i+1] + img[i+2]) / 3;
+      }
+      return s / w;
+    };
+    const colMean = (x) => {
+      let s = 0;
+      for (let y = 0; y < h; y++) {
+        const i = (y * w + x) * 4;
+        s += (img[i] + img[i+1] + img[i+2]) / 3;
+      }
+      return s / h;
+    };
+    let y0 = 0, y1 = h - 1, x0 = 0, x1 = w - 1;
+    while (y0 < y1 && rowMean(y0) <= 8) y0++;
+    while (y1 > y0 && rowMean(y1) <= 8) y1--;
+    while (x0 < x1 && colMean(x0) <= 8) x0++;
+    while (x1 > x0 && colMean(x1) <= 8) x1--;
+    const nw = x1 - x0 + 1, nh = y1 - y0 + 1;
+    if (nw < 8 || nh < 8) return c;
+    const out = document.createElement("canvas");
+    out.width = nw; out.height = nh;
+    out.getContext("2d").drawImage(c, x0, y0, nw, nh, 0, 0, nw, nh);
+    return out;
+  }
+
+  function loadFile(f) {
+    if (!f) return;
+    const img = new Image();
+    img.onload = () => {
+      let c = document.createElement("canvas");
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      c.getContext("2d").drawImage(img, 0, 0);
+      if ($("cropBars").checked) c = cropBlackBars(c);
+      const ctx = c.getContext("2d");
+      src = { canvas: c, w: c.width, h: c.height, data: ctx.getImageData(0, 0, c.width, c.height), name: f.name };
+      stones = [];
+      canvasInfo = buildCanvasInfo();
+      draw();
+      $("status").textContent = src.name + "  " + src.w + "×" + src.h + " px";
+      $("report").textContent = "Image loaded. Click Place stones."; console.log("image loaded", src.w, src.h);
+    };
+    img.onerror = () => { $("report").textContent = "Couldn't read that image. Try a JPG or PNG (on iPhone, set Camera > Formats to Most Compatible or share the photo as JPG)."; };
+    img.src = URL.createObjectURL(f);
+  }
+  $("file").addEventListener("change", (ev) => { loadFile(ev.target.files && ev.target.files[0]); ev.target.value = ""; });
+  document.addEventListener("paste", (ev) => {
+    const items = (ev.clipboardData && ev.clipboardData.items) || [];
+    for (const it of items) if (it.type && it.type.startsWith("image/")) { loadFile(it.getAsFile()); break; }
+  });
+
+  function contentBBox(mask, w, h) {
+    let x0 = w, y0 = h, x1 = 0, y1 = 0, any = false;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (mask[y * w + x]) {
+        any = true;
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+    }
+    if (!any) return { x: 0, y: 0, w: w, h: h };
+    return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  }
+
+  function buildCanvasInfo() {
+    if (!src) return null;
+    const square = $("canvasIn").value === "" ? 0 : +$("canvasIn").value;
+    const margin = +$("marginIn").value || 0;
+    // Content is the non-black area for fill modes, else the full image.
+    let cw = src.w, ch = src.h, cx = 0, cy = 0;
+    const mode = $("mode").value;
+    if (mode !== "detect") {
+      const black = segmentColor(src.data.data, src.w, src.h, "black");
+      const inv = new Uint8Array(black.length);
+      for (let i = 0; i < black.length; i++) inv[i] = black[i] ? 0 : 1;
+      const bb = contentBBox(inv, src.w, src.h);
+      cx = bb.x; cy = bb.y; cw = bb.w; ch = bb.h;
+    }
+    if (square > 0) {
+      const inner = square - 2 * margin;
+      const aspect = cw / ch;
+      let artW, artH;
+      if (aspect >= 1) { artW = inner; artH = inner / aspect; }
+      else { artH = inner; artW = inner * aspect; }
+      return {
+        widthIn: square, heightIn: square,
+        ox: (square - artW) / 2, oy: (square - artH) / 2,
+        inPerPx: artW / cw, srcW: cw, srcH: ch, cx: cx, cy: cy
+      };
+    }
+    const widthIn = +$("widthIn").value || 10;
+    const inPerPx = widthIn / (mode === "detect" ? src.w : cw);
+    const srcW = mode === "detect" ? src.w : cw;
+    const srcH = mode === "detect" ? src.h : ch;
+    return {
+      widthIn: srcW * inPerPx, heightIn: srcH * inPerPx,
+      ox: 0, oy: 0, inPerPx: inPerPx, srcW: srcW, srcH: srcH,
+      cx: mode === "detect" ? 0 : cx, cy: mode === "detect" ? 0 : cy
+    };
+  }
+
+  function pxToIn(x, y, ci) {
+    return { x: ci.ox + (x - ci.cx) * ci.inPerPx, y: ci.oy + (y - ci.cy) * ci.inPerPx };
+  }
+  function inToPx(ix, iy, ci) {
+    return { x: ci.cx + (ix - ci.ox) / ci.inPerPx, y: ci.cy + (iy - ci.oy) / ci.inPerPx };
+  }
+
+  // ---------- image helpers ----------
+  function toGray(data, w, h) {
+    const g = new Uint8Array(w * h);
+    for (let i = 0, p = 0; i < g.length; i++, p += 4)
+      g[i] = (data[p] * 0.299 + data[p+1] * 0.587 + data[p+2] * 0.114) | 0;
+    return g;
+  }
+  function hsvOf(r, g, b) {
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const v = max / 255, s = max === 0 ? 0 : (max - min) / max;
+    let hh = 0;
+    if (max !== min) {
+      const d = max - min;
+      if (max === r) hh = ((g - b) / d + (g < b ? 6 : 0));
+      else if (max === g) hh = (b - r) / d + 2;
+      else hh = (r - g) / d + 4;
+      hh *= 30; // OpenCV-like 0..180
+    }
+    return { h: hh, s: s * 255, v: v * 255 };
+  }
+  function segmentColor(data, w, h, name) {
+    const m = new Uint8Array(w * h);
+    for (let i = 0, p = 0; i < m.length; i++, p += 4) {
+      const r = data[p], g = data[p+1], b = data[p+2];
+      if (name === "white") m[i] = (r > 200 && g > 200 && b > 200) ? 1 : 0;
+      else if (name === "black") m[i] = (r < 30 && g < 30 && b < 30) ? 1 : 0;
+      else if (name === "blue") {
+        const hsv = hsvOf(r, g, b);
+        const isWhite = r > 200 && g > 200 && b > 200;
+        m[i] = (!isWhite && hsv.h >= 85 && hsv.h <= 140 && hsv.s >= 70 && hsv.v >= 35) ? 1 : 0;
+      }
+    }
+    return m;
+  }
+  function morph(src, w, h, radius, erode) {
+    const out = new Uint8Array(src.length);
+    const r = radius | 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let ext = erode ? 255 : 0;
+        for (let dy = -r; dy <= r; dy++) {
+          const yy = y + dy; if (yy < 0 || yy >= h) continue;
+          const rspan = Math.floor(Math.sqrt(r * r - dy * dy));
+          for (let dx = -rspan; dx <= rspan; dx++) {
+            const xx = x + dx; if (xx < 0 || xx >= w) continue;
+            const v = src[yy * w + xx];
+            if (erode) { if (v < ext) ext = v; } else { if (v > ext) ext = v; }
+          }
+        }
+        out[y * w + x] = ext;
+      }
+    }
+    return out;
+  }
+  function tophat(gray, w, h, radius) {
+    const opened = morph(morph(gray, w, h, radius, true), w, h, radius, false);
+    const out = new Uint8Array(gray.length);
+    for (let i = 0; i < gray.length; i++) out[i] = Math.max(0, gray[i] - opened[i]);
+    return out;
+  }
+
+  // ---------- detect ----------
+  function connectedComponents(bin, w, h) {
+    const labels = new Int32Array(bin.length);
+    const xs = [], ys = [], areas = [], id = { n: 0 };
+    function flood(x0, y0, lab) {
+      const stack = [x0, y0];
+      let area = 0, sx = 0, sy = 0, per = 0;
+      while (stack.length) {
+        const y = stack.pop(), x = stack.pop();
+        const i = y * w + x;
+        if (x < 0 || y < 0 || x >= w || y >= h || !bin[i] || labels[i]) continue;
+        labels[i] = lab;
+        area++; sx += x; sy += y;
+        // 4-neighbour perimeter-ish + 8-connected fill
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h || !bin[ny * w + nx]) per++;
+          else { stack.push(nx); stack.push(ny); }
+        }
+      }
+      return { area, cx: sx / area, cy: sy / area, per };
+    }
+    const blobs = [];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (bin[i] && !labels[i]) {
+        const b = flood(x, y, blobs.length + 1);
+        blobs.push(b);
+      }
+    }
+    return blobs;
+  }
+
+  function detectStones(gray, w, h, sensitivity, minDist) {
+    const th = tophat(gray, w, h, 4);
+    const minTh = Math.round(38 - 28 * sensitivity);
+    const minArea = 8 - 4 * sensitivity;
+    const maxArea = 70 + 40 * sensitivity;
+    const minCirc = 0.55 - 0.18 * sensitivity;
+    const bin = new Uint8Array(th.length);
+    for (let i = 0; i < th.length; i++) bin[i] = th[i] >= minTh ? 1 : 0;
+    const blobs = connectedComponents(bin, w, h);
+    const pts = [];
+    for (const b of blobs) {
+      if (b.area < minArea || b.area > maxArea) continue;
+      const circ = (b.per > 0) ? (4 * Math.PI * b.area) / (b.per * b.per) : 0;
+      // perimeter from 8-neighbour count is approximate; be lenient
+      if (circ < minCirc * 0.35) continue;
+      pts.push({ x: b.cx, y: b.cy, d: 2 * Math.sqrt(b.area / Math.PI), v: b.area });
+    }
+    return enforceSpacing(pts, minDist);
+  }
+
+  function enforceSpacing(pts, minDist) {
+    if (!minDist || pts.length < 2) return pts;
+    const scored = pts.slice().sort((a, b) => (b.v || 0) - (a.v || 0));
+    const kept = [];
+    const md2 = minDist * minDist;
+    for (const p of scored) {
+      let ok = true;
+      for (const q of kept) {
+        const dx = p.x - q.x, dy = p.y - q.y;
+        if (dx * dx + dy * dy < md2) { ok = false; break; }
+      }
+      if (ok) kept.push(p);
+    }
+    return kept;
+  }
+
+  // ---------- fill ----------
+  function keepLargest(mask, w, h, minArea) {
+    const blobs = [];
+    const labels = new Int32Array(mask.length);
+    let lab = 0;
+    const stack = [];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (!mask[i] || labels[i]) continue;
+      lab++;
+      stack.push(x, y);
+      let area = 0;
+      while (stack.length) {
+        const yy = stack.pop(), xx = stack.pop();
+        const j = yy * w + xx;
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h || !mask[j] || labels[j]) continue;
+        labels[j] = lab; area++;
+        stack.push(xx+1, yy, xx-1, yy, xx, yy+1, xx, yy-1);
+      }
+      blobs.push({ lab, area });
+    }
+    blobs.sort((a, b) => b.area - a.area);
+    const keep = new Set();
+    for (const b of blobs) {
+      if (keep.size === 0 || b.area >= (minArea || 0)) { keep.add(b.lab); break; }
+    }
+    const out = new Uint8Array(mask.length);
+    for (let i = 0; i < mask.length; i++) if (keep.has(labels[i])) out[i] = 1;
+    return out;
+  }
+
+  function traceContours(mask, w, h) {
+    // Border-follow for 8-connected external and hole contours (simplified).
+    const visited = new Uint8Array(mask.length);
+    const contours = []; // {pts, hole}
+    function isOn(x, y) {
+      return x >= 0 && y >= 0 && x < w && y < h && mask[y * w + x];
+    }
+    const dirs = [[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]];
+    function walk(sx, sy, hole) {
+      const pts = [];
+      let x = sx, y = sy, dir = hole ? 0 : 4;
+      const startKey = sy * w + sx;
+      for (let guard = 0; guard < w * h; guard++) {
+        pts.push([x, y]);
+        visited[y * w + x] = 1;
+        let found = false;
+        for (let k = 0; k < 8; k++) {
+          const nd = (dir + 6 + k) % 8; // turn left first
+          const nx = x + dirs[nd][0], ny = y + dirs[nd][1];
+          if (isOn(nx, ny)) {
+            // start of a boundary: a background neighbour exists
+            x = nx; y = ny; dir = nd; found = true; break;
+          }
+        }
+        if (!found) break;
+        if (x === sx && y === sy && pts.length > 2) break;
+      }
+      return pts;
+    }
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        if (!mask[y * w + x] || visited[y * w + x]) continue;
+        const left = !mask[y * w + (x - 1)];
+        const right = !mask[y * w + (x + 1)];
+        if (left) {
+          const pts = walk(x, y, false);
+          if (pts.length >= 8) contours.push({ pts, hole: false });
+        } else if (right && !visited[y * w + x]) {
+          // possible hole start
+          const pts = walk(x, y, true);
+          if (pts.length >= 8) contours.push({ pts, hole: true });
+        }
+      }
+    }
+    return contours;
+  }
+
+  function evenPoints(pts, spacing) {
+    if (pts.length < 3) return { pts: [], actual: spacing };
+    const closed = pts.concat([pts[0]]);
+    const cum = [0];
+    for (let i = 1; i < closed.length; i++) {
+      const dx = closed[i][0] - closed[i-1][0], dy = closed[i][1] - closed[i-1][1];
+      cum.push(cum[i-1] + Math.hypot(dx, dy));
+    }
+    const length = cum[cum.length - 1];
+    if (length < spacing * 2) return { pts: [], actual: spacing };
+    const n = Math.max(3, Math.round(length / spacing));
+    const actual = length / n;
+    const out = [];
+    let j = 1;
+    for (let i = 0; i < n; i++) {
+      const d = i * actual;
+      while (j < cum.length && cum[j] < d) j++;
+      const t = (d - cum[j-1]) / Math.max(1e-9, cum[j] - cum[j-1]);
+      const x = closed[j-1][0] + t * (closed[j][0] - closed[j-1][0]);
+      const y = closed[j-1][1] + t * (closed[j][1] - closed[j-1][1]);
+      out.push({ x, y });
+    }
+    return { pts: out, actual };
+  }
+
+  function placeOutline(mask, w, h, spacing, edges) {
+    const contours = traceContours(mask, w, h);
+    const pts = [];
+    let spacings = [];
+    for (const c of contours) {
+      if (edges === "outer" && c.hole) continue;
+      if (edges === "inner" && !c.hole) continue;
+      const r = evenPoints(c.pts, spacing);
+      pts.push.apply(pts, r.pts);
+      if (r.pts.length) spacings.push(r.actual);
+    }
+    return { pts, spacings };
+  }
+
+  function chamferDist(maskOn, w, h) {
+    // Distance to nearest ON pixel, for pixels that are off. Two-pass chamfer.
+    const INF = 1e8;
+    const d = new Float32Array(w * h);
+    for (let i = 0; i < d.length; i++) d[i] = maskOn[i] ? 0 : INF;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x; if (d[i] === 0) continue;
+      let v = d[i];
+      if (x) v = Math.min(v, d[i-1] + 1);
+      if (y) v = Math.min(v, d[i-w] + 1);
+      if (x && y) v = Math.min(v, d[i-w-1] + 1.414);
+      if (x < w-1 && y) v = Math.min(v, d[i-w+1] + 1.414);
+      d[i] = v;
+    }
+    for (let y = h-1; y >= 0; y--) for (let x = w-1; x >= 0; x--) {
+      const i = y * w + x;
+      let v = d[i];
+      if (x < w-1) v = Math.min(v, d[i+1] + 1);
+      if (y < h-1) v = Math.min(v, d[i+w] + 1);
+      if (x < w-1 && y < h-1) v = Math.min(v, d[i+w+1] + 1.414);
+      if (x && y < h-1) v = Math.min(v, d[i+w-1] + 1.414);
+      d[i] = v;
+    }
+    return d;
+  }
+
+  function placeHalo(attract, allowed, w, h, rMin, rMax, falloff, existing) {
+    const dist = chamferDist(attract, w, h);
+    const cutoff = falloff * 1.15;
+    const cands = [];
+    const step = rMin * 0.9;
+    const rowH = step * Math.sqrt(3) / 2;
+    let row = 0;
+    for (let y = step * 0.5; y < h; y += rowH, row++) {
+      const xoff = (row % 2 === 0) ? 0 : step * 0.5;
+      for (let x = xoff + step * 0.5; x < w; x += step) {
+        const jx = x + (Math.random() - 0.5) * 0.28 * step;
+        const jy = y + (Math.random() - 0.5) * 0.28 * step;
+        const xi = Math.round(jx), yi = Math.round(jy);
+        if (xi < 0 || yi < 0 || xi >= w || yi >= h) continue;
+        const i = yi * w + xi;
+        if (!allowed[i] || attract[i]) continue;
+        const d = dist[i];
+        if (d > cutoff) continue;
+        const t0 = Math.max(0, Math.min(1, d / Math.max(falloff, 1)));
+        const t = t0 * t0 * (3 - 2 * t0);
+        const r = rMin + (rMax - rMin) * t;
+        cands.push({ d, x: jx, y: jy, r });
+      }
+    }
+    cands.sort((a, b) => a.d - b.d);
+    const kept = (existing || []).map((p) => ({ x: p.x, y: p.y, r: rMin }));
+    const nExist = kept.length;
+    function ok(x, y, r) {
+      for (const q of kept) {
+        const need = Math.max(r, q.r) * 0.98;
+        const dx = x - q.x, dy = y - q.y;
+        if (dx * dx + dy * dy < need * need) return false;
+      }
+      return true;
+    }
+    for (const c of cands) if (ok(c.x, c.y, c.r)) kept.push(c);
+    return kept.slice(nExist);
+  }
+
+  function placeHex(mask, w, h, spacing, margin) {
+    const pts = [];
+    const rowH = spacing * Math.sqrt(3) / 2;
+    let row = 0;
+    for (let y = spacing / 2; y < h; y += rowH, row++) {
+      const xoff = row % 2 === 0 ? 0 : spacing / 2;
+      for (let x = xoff + spacing / 2; x < w; x += spacing) {
+        const xi = Math.round(x), yi = Math.round(y);
+        if (xi >= 0 && yi >= 0 && xi < w && yi < h && mask[yi * w + xi]) {
+          // crude margin: skip if near a zero
+          let edge = false;
+          if (margin > 0) {
+            const m = Math.ceil(margin);
+            for (let dy = -m; dy <= m && !edge; dy++)
+              for (let dx = -m; dx <= m; dx++) {
+                const xx = xi + dx, yy = yi + dy;
+                if (xx < 0 || yy < 0 || xx >= w || yy >= h || !mask[yy * w + xx]) { edge = true; break; }
+              }
+          }
+          if (!edge) pts.push({ x, y });
+        }
+      }
+    }
+    return pts;
+  }
+
+  // ---------- place / draw / export ----------
+  function place() {
+    if (!src) { alert("Load an image first."); return; }
+    const mode = $("mode").value;
+    canvasInfo = buildCanvasInfo();
+    const ci = canvasInfo;
+    const spacingMm = minSpacingMm();
+    const spacingPx = (spacingMm / MM_PER_IN) / ci.inPerPx;
+    const size = $("size").value;
+    let pts = [];
+    let colorDefault = "clear";
+    $("status").textContent = "Working…";
+
+    // Yield so the status can paint.
+    setTimeout(() => {
+      try {
+        if (mode === "detect") {
+          const gray = toGray(src.data.data, src.w, src.h);
+          const sens = +$("sensitivity").value / 100;
+          const found = detectStones(gray, src.w, src.h, sens, Math.max(4, spacingPx * 0.5));
+          // Then enforce cut spacing
+          pts = enforceSpacing(found, spacingPx);
+        } else {
+          const outlineName = $("outlineColor").value;
+          let mask = segmentColor(src.data.data, src.w, src.h, outlineName);
+          const minA = Math.max(50, (0.002 * src.w * src.h) | 0);
+          mask = keepLargest(mask, src.w, src.h, minA);
+          if (mode === "outline" || mode === "outline+halo") {
+            const r = placeOutline(mask, src.w, src.h, spacingPx, $("edges").value);
+            pts = r.pts.map((p) => Object.assign({ color: outlineName, v: 1 }, p));
+            colorDefault = outlineName;
+          }
+          if (mode === "fill") {
+            let target = segmentColor(src.data.data, src.w, src.h, "black");
+            const inv = new Uint8Array(target.length);
+            for (let i = 0; i < target.length; i++) inv[i] = target[i] ? 0 : 1;
+            target = inv;
+            if ($("excludeFill").value) target = segmentColor(src.data.data, src.w, src.h, $("excludeFill").value);
+            const packed = placeHex(target, src.w, src.h, spacingPx, spacingPx * 0.4);
+            pts = pts.concat(packed.map((p) => Object.assign({ color: "clear" }, p)));
+          }
+          if (mode === "halo" || mode === "outline+halo") {
+            const black = segmentColor(src.data.data, src.w, src.h, "black");
+            const attract = new Uint8Array(black.length);
+            for (let i = 0; i < black.length; i++) attract[i] = black[i] ? 0 : 1;
+            const allowed = new Uint8Array(attract.length);
+            allowed.fill(1);
+            const ex = $("excludeFill").value;
+            if (ex) {
+              const em = segmentColor(src.data.data, src.w, src.h, ex);
+              for (let i = 0; i < allowed.length; i++) if (em[i]) allowed[i] = 0;
+            }
+            const om = segmentColor(src.data.data, src.w, src.h, outlineName);
+            for (let i = 0; i < allowed.length; i++) if (om[i]) allowed[i] = 0;
+            const falloffPx = 0.12 * ci.srcW;
+            const existing = pts.map((p) => ({ x: p.x, y: p.y }));
+            const halo = placeHalo(attract, allowed, src.w, src.h, spacingPx * 1.05, spacingPx * 2.6, falloffPx, existing);
+            pts = pts.concat(halo.map((p) => Object.assign({ color: "clear" }, p)));
+          }
+        }
+        const pad = 0.05;
+        stones = [];
+        for (const p of pts) {
+          const q = pxToIn(p.x, p.y, ci);
+          if (q.x < pad || q.y < pad || q.x > ci.widthIn - pad || q.y > ci.heightIn - pad) continue;
+          stones.push({ x: q.x, y: q.y, color: p.color || colorDefault, size: size });
+        }
+        draw();
+        writeReport();
+        $("status").textContent = stones.length + " stones  ·  " + ci.widthIn.toFixed(2) + " × " + ci.heightIn.toFixed(2) + " in";
+      } catch (err) {
+        console.error(err);
+        $("status").textContent = "Error: " + err.message;
+        alert("Placement failed: " + err.message);
+      }
+    }, 30);
+  }
+
+  function draw() {
+    const cv = $("cv");
+    if (!src || !canvasInfo) {
+      const ctx = cv.getContext("2d");
+      ctx.fillStyle = "#1a1d24"; ctx.fillRect(0, 0, cv.width, cv.height);
+      return;
+    }
+    const ci = canvasInfo;
+    const dpi = 110;
+    const W = Math.max(2, Math.round(ci.widthIn * dpi));
+    const H = Math.max(2, Math.round(ci.heightIn * dpi));
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext("2d");
+    ctx.fillStyle = "#f2f2f2";
+    ctx.fillRect(0, 0, W, H);
+    // Place the source (content crop) in the content rectangle.
+    const ox = ci.ox * dpi, oy = ci.oy * dpi;
+    const aw = ci.srcW * ci.inPerPx * dpi, ah = ci.srcH * ci.inPerPx * dpi;
+    ctx.save();
+    ctx.globalAlpha = 0.72;
+    ctx.drawImage(src.canvas, ci.cx, ci.cy, ci.srcW, ci.srcH, ox, oy, aw, ah);
+    ctx.restore();
+    const rIn = (holeMm() / MM_PER_IN) / 2;
+    const rPx = Math.max(1.2, rIn * dpi);
+    for (const s of stones) {
+      const cx = s.x * dpi, cy = s.y * dpi;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rPx, 0, Math.PI * 2);
+      ctx.fillStyle = s.color === "blue" ? "#1e5aa8" : "#222";
+      ctx.fill();
+      ctx.lineWidth = Math.max(1, rPx / 6);
+      ctx.strokeStyle = s.color === "blue" ? "#cfe3ff" : "#fff";
+      ctx.stroke();
+    }
+  }
+
+  $("cv").addEventListener("click", (ev) => {
+    if (!canvasInfo) return;
+    const cv = $("cv");
+    const rect = cv.getBoundingClientRect();
+    const sx = cv.width / rect.width, sy = cv.height / rect.height;
+    const xIn = ((ev.clientX - rect.left) * sx) / (cv.width / canvasInfo.widthIn);
+    const yIn = ((ev.clientY - rect.top) * sy) / (cv.height / canvasInfo.heightIn);
+    const hitR = Math.max(0.08, (holeMm() / MM_PER_IN));
+    let best = -1, bestD = hitR;
+    for (let i = 0; i < stones.length; i++) {
+      const d = Math.hypot(stones[i].x - xIn, stones[i].y - yIn);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    if (best >= 0) stones.splice(best, 1);
+    else stones.push({ x: xIn, y: yIn, color: $("mode").value === "detect" ? "clear" : ($("outlineColor").value || "clear"), size: $("size").value });
+    draw();
+    writeReport();
+  });
+
+  function writeReport() {
+    const ci = canvasInfo;
+    if (!ci) return;
+    const groups = {};
+    stones.forEach((s) => { groups[s.color] = (groups[s.color] || 0) + 1; });
+    const size = $("size").value;
+    let t = "Canvas: " + ci.widthIn.toFixed(3) + " × " + ci.heightIn.toFixed(3) + " in\n";
+    t += cricutNote(ci.widthIn, ci.heightIn) + "\n";
+    t += "Hole Ø " + holeMm().toFixed(2) + " mm  (" + size + " " + SIZES[size].mm.toFixed(2) + " mm + " + (+$("tolerance").value).toFixed(2) + " mm)\n";
+    t += "Min centre spacing: " + minSpacingMm().toFixed(2) + " mm\n\n";
+    Object.keys(groups).forEach((c) => { t += "  " + c + ": " + groups[c] + "  ×  " + size + "\n"; });
+    t += "\nTotal: " + stones.length + "\n";
+    $("report").textContent = t;
+    $("report").className = "report " + (cricutNote(ci.widthIn, ci.heightIn).indexOf("WARNING") >= 0 ? "warn" : "");
+  }
+
+  function circlePath(cx, cy, r) {
+    const k = KAPPA * r;
+    const f = (v) => v.toFixed(5).replace(/0+$/, "").replace(/\.$/, "");
+    return "M " + f(cx+r) + " " + f(cy) +
+      " C " + f(cx+r) + " " + f(cy+k) + " " + f(cx+k) + " " + f(cy+r) + " " + f(cx) + " " + f(cy+r) +
+      " C " + f(cx-k) + " " + f(cy+r) + " " + f(cx-r) + " " + f(cy+k) + " " + f(cx-r) + " " + f(cy) +
+      " C " + f(cx-r) + " " + f(cy-k) + " " + f(cx-k) + " " + f(cy-r) + " " + f(cx) + " " + f(cy-r) +
+      " C " + f(cx+k) + " " + f(cy-r) + " " + f(cx+r) + " " + f(cy-k) + " " + f(cx+r) + " " + f(cy) + " Z";
+  }
+
+  function svgText(stonesOnly) {
+    const ci = canvasInfo;
+    const w = ci.widthIn, h = ci.heightIn;
+    const r = (holeMm() / MM_PER_IN) / 2;
+    const groups = {};
+    stones.forEach((s) => { (groups[s.color] = groups[s.color] || []).push(s); });
+    const fills = { blue: "#1e5aa8", clear: "#111111", default: "#111111" };
+    let out = '<?xml version="1.0" encoding="UTF-8"?>\n';
+    out += '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + 'in" height="' + h + 'in" viewBox="0 0 ' + w + ' ' + h + '" version="1.1">\n';
+    out += "  <title>Rhinestone template</title>\n";
+    out += "  <desc>Holes are filled paths in inch units. In Cricut Design Space set material to flock or rhinestone template and Attach so the layout is kept.</desc>\n";
+    Object.keys(groups).forEach((c) => {
+      out += '  <g id="stones-' + c + '" fill="' + (fills[c] || fills.default) + '" stroke="none">\n';
+      groups[c].forEach((s) => { out += '    <path d="' + circlePath(s.x, s.y, r) + '"/>\n'; });
+      out += "  </g>\n";
+    });
+    out += "</svg>\n";
+    return out;
+  }
+
+  function dxfText() {
+    const ci = canvasInfo;
+    const r = (holeMm() / MM_PER_IN) / 2;
+    const lines = ["0","SECTION","2","HEADER","9","$INSUNITS","70","1","0","ENDSEC",
+      "0","SECTION","2","ENTITIES"];
+    stones.forEach((s) => {
+      const y = ci.heightIn - s.y;
+      lines.push("0","CIRCLE","8","STONES_" + s.color,
+        "10", s.x.toFixed(6), "20", y.toFixed(6), "30", "0.0", "40", r.toFixed(6));
+    });
+    lines.push("0","ENDSEC","0","EOF");
+    return lines.join("\n") + "\n";
+  }
+
+  function download(name, text, mime) {
+    const blob = new Blob([text], { type: mime || "application/octet-stream" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  function stem() {
+    const base = (src && src.name ? src.name.replace(/\.[^.]+$/, "") : "rhinestone");
+    return base + "_" + $("size").value;
+  }
+
+  $("btnPlace").addEventListener("click", place);
+  $("btnClear").addEventListener("click", () => { stones = []; draw(); writeReport(); });
+  $("dlSvg").addEventListener("click", () => { if (!stones.length) return alert("No stones yet."); download(stem() + ".svg", svgText(false), "image/svg+xml"); });
+  $("dlSvgCut").addEventListener("click", () => { if (!stones.length) return alert("No stones yet."); download(stem() + "_cut.svg", svgText(true), "image/svg+xml"); });
+  $("dlDxf").addEventListener("click", () => { if (!stones.length) return alert("No stones yet."); download(stem() + ".dxf", dxfText(), "application/dxf"); });
+  $("dlCounts").addEventListener("click", () => { download(stem() + "_counts.txt", $("report").textContent, "text/plain"); });
+  $("dlPng").addEventListener("click", () => {
+    if (!src) return;
+    $("cv").toBlob((b) => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(b);
+      a.download = stem() + "_preview.png";
+      a.click();
+    }, "image/png");
+  });
+  ["size","tolerance","gap","widthIn","canvasIn","marginIn"].forEach((id) => {
+    $(id).addEventListener("change", () => { if (src) { canvasInfo = buildCanvasInfo(); draw(); writeReport(); } });
+  });
+})();
+</script>
+</body>
+</html>
