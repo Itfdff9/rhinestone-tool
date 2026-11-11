@@ -205,6 +205,16 @@
   const KAPPA = 0.5522847498307936;
 
   const $ = (id) => document.getElementById(id);
+  function showError(msg) {
+    const e = document.getElementById("jsBanner");
+    if (e) { e.style.display = "block"; e.textContent = "Error: " + msg; }
+    const st = $("status");
+    if (st) st.textContent = "Error: " + msg;
+  }
+  function clearError() {
+    const e = document.getElementById("jsBanner");
+    if (e) e.style.display = "none";
+  }
   const sizeSel = $("size");
   const sizeTable = $("sizeTable");
   Object.keys(SIZES).forEach((k) => {
@@ -280,19 +290,30 @@
     if (!f) return;
     const img = new Image();
     img.onload = () => {
-      let c = document.createElement("canvas");
-      c.width = img.naturalWidth; c.height = img.naturalHeight;
-      c.getContext("2d").drawImage(img, 0, 0);
-      if ($("cropBars").checked) c = cropBlackBars(c);
-      const ctx = c.getContext("2d");
-      src = { canvas: c, w: c.width, h: c.height, data: ctx.getImageData(0, 0, c.width, c.height), name: f.name };
-      stones = [];
-      canvasInfo = buildCanvasInfo();
-      draw();
-      $("status").textContent = src.name + "  " + src.w + "×" + src.h + " px";
-      $("report").textContent = "Image loaded. Click Place stones."; console.log("image loaded", src.w, src.h);
+      try {
+        let c = document.createElement("canvas");
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        c.getContext("2d").drawImage(img, 0, 0);
+        if ($("cropBars").checked) c = cropBlackBars(c);
+        const ctx = c.getContext("2d");
+        src = { canvas: c, w: c.width, h: c.height, data: ctx.getImageData(0, 0, c.width, c.height), name: f.name };
+        stones = [];
+        canvasInfo = buildCanvasInfo();
+        draw();
+        clearError();
+        $("status").textContent = src.name + "  " + src.w + "×" + src.h + " px";
+        $("report").textContent = "Image loaded. Click Place stones."; console.log("image loaded", src.w, src.h);
+      } catch (err) {
+        console.error(err);
+        src = null;
+        showError(err && err.message ? err.message : String(err));
+      }
     };
-    img.onerror = () => { $("report").textContent = "Couldn't read that image. Try a JPG or PNG (on iPhone, set Camera > Formats to Most Compatible or share the photo as JPG)."; };
+    img.onerror = () => {
+      const msg = "Couldn't read that image. Try a JPG or PNG (on iPhone, set Camera > Formats to Most Compatible or share the photo as JPG).";
+      $("report").textContent = msg;
+      showError(msg);
+    };
     img.src = URL.createObjectURL(f);
   }
   $("file").addEventListener("change", (ev) => { loadFile(ev.target.files && ev.target.files[0]); ev.target.value = ""; });
@@ -428,16 +449,23 @@
       let area = 0, sx = 0, sy = 0, per = 0;
       while (stack.length) {
         const y = stack.pop(), x = stack.pop();
+        if (x < 0 || y < 0 || x >= w || y >= h) continue;
         const i = y * w + x;
-        if (x < 0 || y < 0 || x >= w || y >= h || !bin[i] || labels[i]) continue;
+        if (!bin[i] || labels[i]) continue;
         labels[i] = lab;
         area++; sx += x; sy += y;
-        // 4-neighbour perimeter-ish + 8-connected fill
+        // Count exposed 4-connected edges. Counting every 8-neighbour background
+        // pixel inflated the perimeter several times over, so a round stone
+        // scored about 0.11 and was rejected.
+        if (x === 0 || !bin[i - 1]) per++;
+        if (x === w - 1 || !bin[i + 1]) per++;
+        if (y === 0 || !bin[i - w]) per++;
+        if (y === h - 1 || !bin[i + w]) per++;
         for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
           if (!dx && !dy) continue;
           const nx = x + dx, ny = y + dy;
-          if (nx < 0 || ny < 0 || nx >= w || ny >= h || !bin[ny * w + nx]) per++;
-          else { stack.push(nx); stack.push(ny); }
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h || !bin[ny * w + nx]) continue;
+          stack.push(nx); stack.push(ny);
         }
       }
       return { area, cx: sx / area, cy: sy / area, per };
@@ -453,6 +481,65 @@
     return blobs;
   }
 
+  // The detector is tuned for stones about 8 px across. Phone photos are far
+  // larger than that, so a fixed 4 px tophat erases the real stones and then
+  // spends a long time doing it. Shrink (or slightly grow) so a stone is ~8 px.
+  function resampleGray(src, sw, sh, dw, dh) {
+    const out = new Uint8Array(dw * dh);
+    if (dw <= sw && dh <= sh) {
+      for (let y = 0; y < dh; y++) {
+        let y0 = (y * sh / dh) | 0;
+        let y1 = ((y + 1) * sh / dh) | 0;
+        if (y1 <= y0) y1 = Math.min(sh, y0 + 1);
+        for (let x = 0; x < dw; x++) {
+          let x0 = (x * sw / dw) | 0;
+          let x1 = ((x + 1) * sw / dw) | 0;
+          if (x1 <= x0) x1 = Math.min(sw, x0 + 1);
+          let s = 0, n = 0;
+          for (let yy = y0; yy < y1; yy++) {
+            const row = yy * sw;
+            for (let xx = x0; xx < x1; xx++) { s += src[row + xx]; n++; }
+          }
+          out[y * dw + x] = n ? Math.round(s / n) : 0;
+        }
+      }
+      return out;
+    }
+    for (let y = 0; y < dh; y++) {
+      const fy = (y + 0.5) * sh / dh - 0.5;
+      const y0 = Math.max(0, fy | 0);
+      const y1 = Math.min(sh - 1, y0 + 1);
+      const ty = Math.min(1, Math.max(0, fy - y0));
+      for (let x = 0; x < dw; x++) {
+        const fx = (x + 0.5) * sw / dw - 0.5;
+        const x0 = Math.max(0, fx | 0);
+        const x1 = Math.min(sw - 1, x0 + 1);
+        const tx = Math.min(1, Math.max(0, fx - x0));
+        const v0 = src[y0 * sw + x0] + (src[y0 * sw + x1] - src[y0 * sw + x0]) * tx;
+        const v1 = src[y1 * sw + x0] + (src[y1 * sw + x1] - src[y1 * sw + x0]) * tx;
+        out[y * dw + x] = Math.max(0, Math.min(255, Math.round(v0 + (v1 - v0) * ty)));
+      }
+    }
+    return out;
+  }
+  function scaleGrayForStones(gray, sw, sh, stonePx) {
+    const TARGET = 8, MAX_SIDE = 1200;
+    let scale = 1;
+    if (stonePx > 12) scale = TARGET / stonePx;
+    else if (stonePx > 0 && stonePx < 5) scale = Math.min(TARGET / stonePx, MAX_SIDE / Math.max(sw, sh));
+    if (!(scale > 0) || Math.abs(scale - 1) < 0.02) return { gray: gray, w: sw, h: sh, scale: 1 };
+    let dw = Math.max(16, Math.round(sw * scale));
+    let dh = Math.max(16, Math.round(sh * scale));
+    const side = Math.max(dw, dh);
+    if (side > MAX_SIDE) {
+      const f = MAX_SIDE / side;
+      dw = Math.max(16, Math.round(dw * f));
+      dh = Math.max(16, Math.round(dh * f));
+    }
+    if (stonePx < 5 && dw <= sw && dh <= sh) return { gray: gray, w: sw, h: sh, scale: 1 };
+    return { gray: resampleGray(gray, sw, sh, dw, dh), w: dw, h: dh, scale: dw / sw };
+  }
+
   function detectStones(gray, w, h, sensitivity, minDist) {
     const th = tophat(gray, w, h, 4);
     const minTh = Math.round(38 - 28 * sensitivity);
@@ -466,8 +553,8 @@
     for (const b of blobs) {
       if (b.area < minArea || b.area > maxArea) continue;
       const circ = (b.per > 0) ? (4 * Math.PI * b.area) / (b.per * b.per) : 0;
-      // perimeter from 8-neighbour count is approximate; be lenient
-      if (circ < minCirc * 0.35) continue;
+      // A disk's 4-edge perimeter scores near 0.6, inside this sensitivity range.
+      if (circ < minCirc) continue;
       pts.push({ x: b.cx, y: b.cy, d: 2 * Math.sqrt(b.area / Math.PI), v: b.area });
     }
     return enforceSpacing(pts, minDist);
@@ -699,13 +786,31 @@
 
   // ---------- place / draw / export ----------
   function place() {
-    if (!src) { alert("Load an image first."); return; }
+    try {
+    if (!src) {
+      showError("Load an image first.");
+      $("report").textContent = "Load an image first, then click Place stones.";
+      return;
+    }
     const mode = $("mode").value;
     canvasInfo = buildCanvasInfo();
     const ci = canvasInfo;
+    if (!ci || !(ci.inPerPx > 0) || !(ci.widthIn > 0) || !(ci.heightIn > 0)) {
+      showError("Canvas size is too small. Increase the width or square canvas, or lower the margin.");
+      return;
+    }
     const spacingMm = minSpacingMm();
     const spacingPx = (spacingMm / MM_PER_IN) / ci.inPerPx;
+    if (!(spacingPx > 0) || !isFinite(spacingPx)) {
+      showError("Spacing must be greater than zero. Check the stone size, gap, and canvas settings.");
+      return;
+    }
     const size = $("size").value;
+    if (!SIZES[size]) {
+      showError("Choose a stone size first.");
+      return;
+    }
+    clearError();
     let pts = [];
     let colorDefault = "clear";
     $("status").textContent = "Working…";
@@ -716,7 +821,12 @@
         if (mode === "detect") {
           const gray = toGray(src.data.data, src.w, src.h);
           const sens = +$("sensitivity").value / 100;
-          const found = detectStones(gray, src.w, src.h, sens, Math.max(4, spacingPx * 0.5));
+          const stonePx = (SIZES[size].mm / MM_PER_IN) / ci.inPerPx;
+          const work = scaleGrayForStones(gray, src.w, src.h, stonePx);
+          const found = detectStones(work.gray, work.w, work.h, sens, Math.max(4, spacingPx * work.scale * 0.5));
+          if (work.scale !== 1) {
+            for (let i = 0; i < found.length; i++) { found[i].x /= work.scale; found[i].y /= work.scale; }
+          }
           // Then enforce cut spacing
           pts = enforceSpacing(found, spacingPx);
         } else {
@@ -766,13 +876,21 @@
         }
         draw();
         writeReport();
-        $("status").textContent = stones.length + " stones  ·  " + ci.widthIn.toFixed(2) + " × " + ci.heightIn.toFixed(2) + " in";
+        if (!stones.length) {
+          $("status").textContent = "No stones placed. For a photo, raise Sensitivity. For flat artwork, choose a Fill mode.";
+          $("report").textContent += "No stones were placed. For a photo, raise Sensitivity. For flat artwork, choose a Fill mode (outline, hex, or halo).\n";
+        } else {
+          $("status").textContent = stones.length + " stones  ·  " + ci.widthIn.toFixed(2) + " × " + ci.heightIn.toFixed(2) + " in";
+        }
       } catch (err) {
         console.error(err);
-        $("status").textContent = "Error: " + err.message;
-        alert("Placement failed: " + err.message);
+        showError(err && err.message ? err.message : String(err));
       }
     }, 30);
+    } catch (err) {
+      console.error(err);
+      showError(err && err.message ? err.message : String(err));
+    }
   }
 
   function draw() {
