@@ -52,6 +52,11 @@
     border: 1px solid var(--line); }
   button:disabled { opacity: .5; cursor: default; }
   .btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .mode-near { display: none; }
+  .suggest { display: none; background: #2a2416; border: 1px solid var(--accent); color: var(--ink);
+    border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
+  .suggest p { margin: 0 0 8px; font-size: 13px; }
+  .suggest button { width: 100%; padding: 12px 10px; font-size: 15px; }
   .report { background: #12141a; border: 1px solid var(--line); border-radius: 6px;
     padding: 8px 10px; white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace;
     color: #d0d5dd; max-height: 240px; overflow: auto; }
@@ -60,7 +65,12 @@
   .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
   table.sizes { width: 100%; border-collapse: collapse; font-size: 12px; }
   table.sizes th, table.sizes td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--line); }
-  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } aside { max-height: 50vh; } }
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+    aside { max-height: 50vh; }
+    .mode-near { display: block; margin-top: 12px; }
+    .mode-near select { font-size: 16px; padding: 10px 8px; }
+  }
 </style>
 </head>
 <body>
@@ -149,6 +159,21 @@
     <input type="number" id="spacingMm" value="" placeholder="auto" min="1" max="20" step="0.1">
   </label>
 
+  <div class="mode-near">
+    <label>Placement
+      <select id="modeQuick">
+        <option value="detect">Detect from photo</option>
+        <option value="outline">Fill: outline edges</option>
+        <option value="fill">Fill: solid hex pack</option>
+        <option value="halo">Fill: halo scatter</option>
+        <option value="outline+halo">Fill: outline + halo</option>
+      </select>
+    </label>
+  </div>
+  <div class="suggest" id="artSuggest">
+    <p id="artSuggestText"></p>
+    <button type="button" id="artSuggestBtn">Outline the artwork</button>
+  </div>
   <div class="btns">
     <button id="btnPlace">Place stones</button>
     <button class="secondary" id="btnClear">Clear stones</button>
@@ -286,6 +311,80 @@
     return out;
   }
 
+  function setMode(v) {
+    $("mode").value = v;
+    const q = $("modeQuick");
+    if (q) q.value = v;
+  }
+  function hideArtSuggest() {
+    const el = $("artSuggest");
+    if (el) el.style.display = "none";
+  }
+  function showArtSuggest(n) {
+    const el = $("artSuggest");
+    if (!el) return;
+    $("artSuggestText").textContent = "Only " + n + " stone" + (n === 1 ? "" : "s") + " found. This looks like flat artwork, so Detect from photo is the wrong mode.";
+    $("artSuggestBtn").textContent = "Outline the artwork";
+    el.style.display = "block";
+  }
+  function isBluePixel(r, g, b) {
+    const hsv = hsvOf(r, g, b);
+    const isWhite = r > 200 && g > 200 && b > 200;
+    return !isWhite && hsv.h >= 85 && hsv.h <= 140 && hsv.s >= 70 && hsv.v >= 35;
+  }
+  // Flat script art is a few solid colours (or transparency). A photo of stones
+  // is textured and full of small highlights, even when the background is plain.
+  function classifyImage(data, w, h) {
+    const step = Math.max(1, Math.round(Math.sqrt((w * h) / 20000)));
+    let n = 0, trans = 0, flat = 0, chroma = 0, specks = 0;
+    const seen = new Uint8Array(512);
+    let unique = 0;
+    for (let y = 0; y < h; y += step) {
+      for (let x = 0; x < w; x += step) {
+        const i = (y * w + x) * 4;
+        const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
+        n++;
+        if (a < 16) { trans++; continue; }
+        const key = ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5);
+        if (!seen[key]) { seen[key] = 1; unique++; }
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        if (max - min > 35 && max > 50) chroma++;
+        let same = 0, neigh = 0;
+        const lum = (r * 0.299 + g * 0.587 + b * 0.114);
+        if (x + step < w) {
+          const j = (y * w + x + step) * 4;
+          neigh++;
+          if (Math.abs(r - data[j]) + Math.abs(g - data[j+1]) + Math.abs(b - data[j+2]) < 24) same++;
+          const lum2 = data[j] * 0.299 + data[j+1] * 0.587 + data[j+2] * 0.114;
+          if (lum > lum2 + 50 && lum > 170) specks++;
+        }
+        if (neigh && same === neigh) flat++;
+      }
+    }
+    const transFrac = n ? trans / n : 0;
+    const flatFrac = n ? flat / n : 0;
+    const chromaFrac = chroma / Math.max(1, n - trans);
+    const speckFrac = n ? specks / n : 0;
+    const art = speckFrac < 0.012 && chromaFrac > 0.015 && (transFrac > 0.08 || (unique <= 40 && flatFrac > 0.42));
+    return { art: art, unique: unique, flatFrac: flatFrac, transFrac: transFrac, speckFrac: speckFrac };
+  }
+  function dominantInk(data, w, h) {
+    const step = Math.max(1, Math.round(Math.sqrt((w * h) / 12000)));
+    let blue = 0, white = 0, black = 0;
+    for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step) {
+      const i = (y * w + x) * 4;
+      const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
+      if (a < 16) continue;
+      if (isBluePixel(r, g, b)) blue++;
+      else if (r > 200 && g > 200 && b > 200) white++;
+      else if (r < 30 && g < 30 && b < 30) black++;
+    }
+    if (blue >= white && blue >= black && blue > 8) return "blue";
+    if (white >= black && white > 8) return "white";
+    if (black > 8) return "black";
+    return "blue";
+  }
+
   function loadFile(f) {
     if (!f) return;
     const img = new Image();
@@ -296,13 +395,24 @@
         c.getContext("2d").drawImage(img, 0, 0);
         if ($("cropBars").checked) c = cropBlackBars(c);
         const ctx = c.getContext("2d");
-        src = { canvas: c, w: c.width, h: c.height, data: ctx.getImageData(0, 0, c.width, c.height), name: f.name };
+        const data = ctx.getImageData(0, 0, c.width, c.height);
+        const kind = classifyImage(data.data, c.width, c.height);
+        src = { canvas: c, w: c.width, h: c.height, data: data, name: f.name, flatArt: kind.art };
         stones = [];
+        hideArtSuggest();
+        clearError();
+        if (kind.art) {
+          setMode("outline");
+          $("outlineColor").value = dominantInk(data.data, c.width, c.height);
+          $("report").textContent = "This looks like flat artwork, so Outline was selected. Tap Place stones.";
+        } else {
+          setMode("detect");
+          $("report").textContent = "This looks like a photo of stones, so Detect was selected. Tap Place stones.";
+        }
         canvasInfo = buildCanvasInfo();
         draw();
-        clearError();
-        $("status").textContent = src.name + "  " + src.w + "×" + src.h + " px";
-        $("report").textContent = "Image loaded. Click Place stones."; console.log("image loaded", src.w, src.h);
+        $("status").textContent = src.name + "  " + src.w + "×" + src.h + " px  ·  " + (kind.art ? "flat artwork" : "photo");
+        console.log("image loaded", src.w, src.h, kind);
       } catch (err) {
         console.error(err);
         src = null;
@@ -540,24 +650,45 @@
     return { gray: resampleGray(gray, sw, sh, dw, dh), w: dw, h: dh, scale: dw / sw };
   }
 
-  function detectStones(gray, w, h, sensitivity, minDist) {
-    const th = tophat(gray, w, h, 4);
+  function bottomHat(gray, w, h, radius) {
+    const closed = morph(morph(gray, w, h, radius, false), w, h, radius, true);
+    const out = new Uint8Array(gray.length);
+    for (let i = 0; i < gray.length; i++) out[i] = Math.max(0, closed[i] - gray[i]);
+    return out;
+  }
+  function peaksToPoints(resp, w, h, sensitivity, minDist) {
     const minTh = Math.round(38 - 28 * sensitivity);
     const minArea = 8 - 4 * sensitivity;
     const maxArea = 70 + 40 * sensitivity;
     const minCirc = 0.55 - 0.18 * sensitivity;
-    const bin = new Uint8Array(th.length);
-    for (let i = 0; i < th.length; i++) bin[i] = th[i] >= minTh ? 1 : 0;
+    const bin = new Uint8Array(resp.length);
+    for (let i = 0; i < resp.length; i++) bin[i] = resp[i] >= minTh ? 1 : 0;
     const blobs = connectedComponents(bin, w, h);
     const pts = [];
     for (const b of blobs) {
       if (b.area < minArea || b.area > maxArea) continue;
       const circ = (b.per > 0) ? (4 * Math.PI * b.area) / (b.per * b.per) : 0;
-      // A disk's 4-edge perimeter scores near 0.6, inside this sensitivity range.
-      if (circ < minCirc) continue;
+      // Highlights and blue stones on fabric score a bit under a perfect disk.
+      if (circ < minCirc * 0.75) continue;
       pts.push({ x: b.cx, y: b.cy, d: 2 * Math.sqrt(b.area / Math.PI), v: b.area });
     }
     return enforceSpacing(pts, minDist);
+  }
+  function detectStones(gray, w, h, sensitivity, minDist) {
+    return peaksToPoints(tophat(gray, w, h, 4), w, h, sensitivity, minDist);
+  }
+  function colorAtSource(x, y) {
+    const rad = 4;
+    const x0 = Math.max(0, Math.round(x) - rad), x1 = Math.min(src.w - 1, Math.round(x) + rad);
+    const y0 = Math.max(0, Math.round(y) - rad), y1 = Math.min(src.h - 1, Math.round(y) + rad);
+    let blue = 0, n = 0;
+    const d = src.data.data;
+    for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) {
+      const i = (yy * src.w + xx) * 4;
+      n++;
+      if (isBluePixel(d[i], d[i+1], d[i+2])) blue++;
+    }
+    return n && blue / n >= 0.28 ? "blue" : "clear";
   }
 
   function enforceSpacing(pts, minDist) {
@@ -599,9 +730,11 @@
     }
     blobs.sort((a, b) => b.area - a.area);
     const keep = new Set();
-    for (const b of blobs) {
-      if (keep.size === 0 || b.area >= (minArea || 0)) { keep.add(b.lab); break; }
-    }
+    // Keep every region big enough to be a letter. Stopping after the largest
+    // one dropped a separate capital (the E in "Elite") and only outlined the rest.
+    const largest = blobs.length ? blobs[0].area : 0;
+    const floor = Math.min(largest, Math.max(80, Math.min(minArea || 80, Math.round(largest * 0.04))));
+    for (const b of blobs) if (b.area >= floor) keep.add(b.lab);
     const out = new Uint8Array(mask.length);
     for (let i = 0; i < mask.length; i++) if (keep.has(labels[i])) out[i] = 1;
     return out;
@@ -823,12 +956,23 @@
           const sens = +$("sensitivity").value / 100;
           const stonePx = (SIZES[size].mm / MM_PER_IN) / ci.inPerPx;
           const work = scaleGrayForStones(gray, src.w, src.h, stonePx);
-          const found = detectStones(work.gray, work.w, work.h, sens, Math.max(4, spacingPx * work.scale * 0.5));
+          const minDist = Math.max(4, spacingPx * work.scale * 0.5);
+          const bright = detectStones(work.gray, work.w, work.h, sens, minDist);
+          // Blue stones on a white outline are dark dots, not bright ones.
+          const dark = peaksToPoints(bottomHat(work.gray, work.w, work.h, 4), work.w, work.h, sens, minDist);
+          const found = bright.concat(dark);
           if (work.scale !== 1) {
             for (let i = 0; i < found.length; i++) { found[i].x /= work.scale; found[i].y /= work.scale; }
           }
-          // Then enforce cut spacing
-          pts = enforceSpacing(found, spacingPx);
+          for (let i = 0; i < found.length; i++) found[i].color = colorAtSource(found[i].x, found[i].y);
+          // Drop dark-fabric shadows that are not actually blue stones.
+          const colored = [];
+          for (let i = 0; i < found.length; i++) {
+            const fromDark = i >= bright.length;
+            if (fromDark && found[i].color !== "blue") continue;
+            colored.push(found[i]);
+          }
+          pts = enforceSpacing(colored, spacingPx);
         } else {
           const outlineName = $("outlineColor").value;
           let mask = segmentColor(src.data.data, src.w, src.h, outlineName);
@@ -876,9 +1020,15 @@
         }
         draw();
         writeReport();
+        hideArtSuggest();
         if (!stones.length) {
           $("status").textContent = "No stones placed. For a photo, raise Sensitivity. For flat artwork, choose a Fill mode.";
           $("report").textContent += "No stones were placed. For a photo, raise Sensitivity. For flat artwork, choose a Fill mode (outline, hex, or halo).\n";
+          if (mode === "detect" && src.flatArt) showArtSuggest(0);
+        } else if (mode === "detect" && src.flatArt && stones.length < 80) {
+          $("status").textContent = stones.length + " stones — too few for this artwork. Tap “Outline the artwork”.";
+          $("report").textContent += "Only " + stones.length + " stones. Flat artwork should use Outline, not Detect.\n";
+          showArtSuggest(stones.length);
         } else {
           $("status").textContent = stones.length + " stones  ·  " + ci.widthIn.toFixed(2) + " × " + ci.heightIn.toFixed(2) + " in";
         }
@@ -1022,6 +1172,9 @@
     return base + "_" + $("size").value;
   }
 
+  $("mode").addEventListener("change", () => { const q = $("modeQuick"); if (q) q.value = $("mode").value; });
+  $("modeQuick").addEventListener("change", () => { $("mode").value = $("modeQuick").value; });
+  $("artSuggestBtn").addEventListener("click", () => { setMode("outline"); hideArtSuggest(); place(); });
   $("btnPlace").addEventListener("click", place);
   $("btnClear").addEventListener("click", () => { stones = []; draw(); writeReport(); });
   $("dlSvg").addEventListener("click", () => { if (!stones.length) return alert("No stones yet."); download(stem() + ".svg", svgText(false), "image/svg+xml"); });
